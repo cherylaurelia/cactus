@@ -179,11 +179,23 @@ def build_schema(fn: Callable) -> dict:
     return out
 
 
+def _coerce(annotation, value):
+    origin = typing.get_origin(annotation)
+    if origin is typing.Annotated:
+        return _coerce(typing.get_args(annotation)[0], value)
+    if origin in _UNION_ORIGINS:
+        rest = [a for a in typing.get_args(annotation) if a is not type(None)]
+        return value if value is None or not rest else _coerce(rest[0], value)
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        return annotation(value)
+    return value
+
+
 def bind_arguments(fn: Callable, arguments: dict) -> dict:
     """Arguments for calling ``fn``, read by the same rules ``build_schema`` used.
 
     The engine omits optional arguments, so an omitted ``Optional`` becomes None
-    and an omitted ``Field(default=...)`` its default.
+    and an omitted ``Field(default=...)`` its default; enum values become members.
     """
     try:
         parameters = inspect.signature(fn).parameters
@@ -192,9 +204,12 @@ def bind_arguments(fn: Callable, arguments: dict) -> dict:
     hints = _type_hints(fn)
     bound = dict(arguments)
     for name, param in parameters.items():
-        if name in bound or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+        if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             continue
         annotation = hints.get(name, param.annotation)
+        if name in bound:
+            bound[name] = _coerce(annotation, bound[name])
+            continue
         field = _field_of(annotation, param.default)
         if field and field.has_default():
             bound[name] = field.default

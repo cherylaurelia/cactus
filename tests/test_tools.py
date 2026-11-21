@@ -263,6 +263,11 @@ def test_model_arguments_keep_their_defs_on_the_tool_parameters():
     assert parameters["properties"]["definitions"] == {"type": "object"}
 
 
+class Mode(enum.Enum):
+    COOL = "cool"
+    HEAT = "heat"
+
+
 def _received(fn, arguments):
     from cactus.agent.tools import bind_arguments
     return fn(**bind_arguments(fn, arguments))
@@ -297,6 +302,26 @@ def test_an_omitted_required_field_argument_is_an_error_not_the_field():
 
     with pytest.raises(TypeError, match="temp"):
         bind_arguments(f, {})
+
+
+@pytest.mark.parametrize("annotation", [
+    Mode, typing.Optional[Mode], typing.Annotated[Mode, Field(description="mode")]])
+def test_an_enum_argument_is_passed_as_the_member(annotation):
+    def f(mode: annotation):
+        return mode
+
+    assert _received(f, {"mode": "heat"}) is Mode.HEAT
+    assert _received(f, {"mode": Mode.COOL}) is Mode.COOL
+
+
+def test_an_enum_value_outside_the_enum_is_an_error():
+    from cactus.agent.tools import bind_arguments
+
+    def f(mode: Mode):
+        return mode
+
+    with pytest.raises(ValueError, match="warm"):
+        bind_arguments(f, {"mode": "warm"})
 
 
 def test_other_arguments_pass_through_unchanged():
