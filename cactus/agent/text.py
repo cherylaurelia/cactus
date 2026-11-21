@@ -8,7 +8,7 @@ import warnings
 from .._telemetry import track as _track
 from . import runtime
 from .runtime import synchronized
-from .tools import build_schema, pydantic_schema, _is_pydantic_model
+from .tools import bind_arguments, build_schema, pydantic_schema, _is_pydantic_model
 from .grounding import (
     _jsonable, _source_years,
     _with_date_fact, _annotate_ungrounded, _validate_extraction,
@@ -279,7 +279,10 @@ class Cactus:
                     results.append({"error": "unknown tool: " + name})
                     continue
                 try:
-                    results.append(fn(**(call.get("arguments") or {})))
+                    arguments = call.get("arguments") or {}
+                    if not _is_pydantic_model(fn):
+                        arguments = bind_arguments(fn, arguments)
+                    results.append(fn(**arguments))
                 except Exception as exc:
                     results.append({"error": str(exc)})
             executed.extend(results)

@@ -261,3 +261,60 @@ def test_model_arguments_keep_their_defs_on_the_tool_parameters():
     assert "$defs" not in parameters["properties"]["backup"]["items"]
     assert parameters["$defs"]["Address"]["properties"]["city"]["type"] == "string"
     assert parameters["properties"]["definitions"] == {"type": "object"}
+
+
+def _received(fn, arguments):
+    from cactus.agent.tools import bind_arguments
+    return fn(**bind_arguments(fn, arguments))
+
+
+@pytest.mark.parametrize("annotation", [
+    typing.Optional[str],
+    typing.Annotated[typing.Optional[str], Field(description="metric or imperial")],
+])
+def test_an_omitted_optional_argument_is_passed_as_none(annotation):
+    def f(city: str, units: annotation):
+        return {"city": city, "units": units}
+
+    assert "units" not in build_schema(f)["parameters"]["required"]
+    assert _received(f, {"city": "Lagos"}) == {"city": "Lagos", "units": None}
+
+
+def test_an_omitted_field_default_is_passed_as_its_value():
+    def f(minutes: int, label: str = Field(default="timer", description="timer label"),
+          tag: typing.Annotated[str, Field(default="none")] = "none"):
+        return label, tag
+
+    assert _received(f, {"minutes": 10}) == ("timer", "none")
+    assert _received(f, {"minutes": 10, "label": "tea"}) == ("tea", "none")
+
+
+def test_an_omitted_required_field_argument_is_an_error_not_the_field():
+    from cactus.agent.tools import bind_arguments
+
+    def f(temp: int = Field(description="temperature", ge=0, le=100)):
+        return temp
+
+    with pytest.raises(TypeError, match="temp"):
+        bind_arguments(f, {})
+
+
+def test_other_arguments_pass_through_unchanged():
+    def f(a: int, b: typing.List[str], c: dict, d="x", e: typing.Optional[int] = 3):
+        return a, b, c, d, e
+
+    assert _received(f, {"a": 1, "b": ["y"], "c": {"k": 1}}) == (1, ["y"], {"k": 1}, "x", 3)
+    assert _received(f, {"a": 1, "b": [], "c": {}, "e": None}) == (1, [], {}, "x", None)
+
+
+def test_extra_arguments_reach_var_keyword():
+    def f(city: str, *args, **extra):
+        return city, args, extra
+
+    assert _received(f, {"city": "Oslo", "units": "metric"}) == ("Oslo", (), {"units": "metric"})
+
+
+def test_a_callable_without_a_signature_gets_the_arguments_as_given():
+    from cactus.agent.tools import bind_arguments
+
+    assert bind_arguments(max, {"default": 0}) == {"default": 0}

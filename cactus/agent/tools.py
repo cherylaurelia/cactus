@@ -140,12 +140,16 @@ def _indent(line):
     return len(line) - len(line.lstrip())
 
 
+def _type_hints(fn):
+    try:
+        return typing.get_type_hints(fn, include_extras=True)
+    except Exception:
+        return {}
+
+
 def build_schema(fn: Callable) -> dict:
     signature = inspect.signature(fn)
-    try:
-        hints = typing.get_type_hints(fn, include_extras=True)
-    except Exception:
-        hints = {}
+    hints = _type_hints(fn)
     description, arg_docs = _parse_doc(fn.__doc__)
     properties, required, defs = {}, [], {}
     for name, param in signature.parameters.items():
@@ -173,6 +177,32 @@ def build_schema(fn: Callable) -> dict:
         out["description"] = description
     out["parameters"] = parameters
     return out
+
+
+def bind_arguments(fn: Callable, arguments: dict) -> dict:
+    """Arguments for calling ``fn``, read by the same rules ``build_schema`` used.
+
+    The engine omits optional arguments, so an omitted ``Optional`` becomes None
+    and an omitted ``Field(default=...)`` its default.
+    """
+    try:
+        parameters = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return dict(arguments)
+    hints = _type_hints(fn)
+    bound = dict(arguments)
+    for name, param in parameters.items():
+        if name in bound or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+            continue
+        annotation = hints.get(name, param.annotation)
+        field = _field_of(annotation, param.default)
+        if field and field.has_default():
+            bound[name] = field.default
+        elif isinstance(param.default, Field) or param.default is param.empty:
+            if not _is_optional(annotation):
+                raise TypeError(f"{fn.__name__}() missing required argument: '{name}'")
+            bound[name] = None
+    return bound
 
 
 def _is_pydantic_model(obj):

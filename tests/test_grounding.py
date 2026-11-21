@@ -465,3 +465,39 @@ def test_complete_checks_dates_inside_a_nested_model_argument(stub):
     response = agent.complete("Ship the Acme order, invoice due on 5th September 2031")
 
     assert response["validation"]["ungrounded"] == ["ship.shipment.invoice.due_date"]
+
+
+def test_run_calls_a_tool_with_the_optional_argument_the_engine_left_out(stub):
+    import cactus
+    from typing import Optional
+
+    @cactus.tool
+    def get_weather(city: str, units: Optional[str]):
+        "Get the current weather for a city."
+        return {"city": city, "units": units}
+
+    stub.envelopes = [{"type": "call", "confidence": 0.9,
+                       "function_calls": [{"name": "get_weather",
+                                           "arguments": {"city": "Lagos"}}]},
+                      {"type": "respond", "function_calls": []}]
+    agent = cactus.Needle(tools=[get_weather])
+    response = agent.run("What's the weather in Lagos?")
+
+    assert response["results"] == [{"city": "Lagos", "units": None}]
+
+
+def test_run_leaves_pydantic_tool_arguments_to_pydantic(stub):
+    import cactus
+    from typing import Optional
+
+    class Reminder(pydantic.BaseModel):
+        text: str
+        when: Optional[str]
+
+    stub.envelopes = [{"type": "call", "confidence": 0.9,
+                       "function_calls": [{"name": "Reminder",
+                                           "arguments": {"text": "call mom"}}]},
+                      {"type": "respond", "function_calls": []}]
+    response = cactus.Needle(tools=[Reminder]).run("remind me to call mom")
+
+    assert "when" in response["results"][0]["error"]
